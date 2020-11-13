@@ -69,7 +69,10 @@ def main(config_file="parameters.ini"):
 
     if load_model_weights:
         print("Loading Model Weights From: {path}".format(path=model_weights_path))
-        model = torch.load(model_weights_path)
+        if is_cuda:
+            model = torch.load(model_weights_path)
+        else:
+            model = torch.load(model_weights_path, map_location=lambda storage, loc: storage)
 
     else:
         # Step 3. Construct neural net (N) - this can be replaced with any model of interest
@@ -104,7 +107,7 @@ def main(config_file="parameters.ini"):
                 zip(train_dataloader_dict["benign"], train_dataloader_dict["malicious"])):
             # Check for adversarial learning
             mal_x = inner_maximizer(
-                mal_x, mal_y, model, loss_fct, iterations=evasion_iterations, method=training_method)
+                mal_x, mal_y, model, loss_fct, iterations=evasion_iterations, method=training_method,mal_index=batch_idx * int(parameters["hyperparam"]["training_batch_size"]), dataset=train_dataloader_dict)
 
             # stack input
             if is_cuda:

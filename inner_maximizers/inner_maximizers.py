@@ -7,7 +7,8 @@ import torch
 from torch.autograd import Variable
 from utils.utils import or_float_tensors, xor_float_tensors, clip_tensor
 import numpy as np
-
+import random
+import math
 
 # helper function
 def round_x(x, alpha=0.5):
@@ -36,6 +37,248 @@ def get_x0(x, is_sample=False):
         return or_float_tensors(x, rand_x)
     else:
         return x
+
+def my_loss(x, x_next, target):
+    loss1 = - x * (1 - x_next)
+    loss2 = - torch.log(1 + (1/((10*(0.5**11))-(0.5**10))*(((x_next-0.5)**10)-(((0.5)**9)*10*((x_next-0.5)**2))+(10*(0.5**11))-(0.5**10)))) 
+    return torch.mean(loss1) + torch.mean(loss2)
+
+def newloss(x,
+            y,
+            model,
+            loss_fct,
+            k=25,
+            epsilon=0.02,
+            alpha=0.5,
+            is_report_loss_diff=False,
+            use_sample=False):
+
+    # some book-keeping
+    if next(model.parameters()).is_cuda:
+        x = x.cuda()
+        y = y.cuda()
+    y = Variable(y)
+    x_var = Variable(x, requires_grad=False)
+
+    # initialize starting point
+    x_next = get_x0(x, use_sample)
+
+    # compute natural loss
+    loss_natural = loss_fct(model(x_var), y).data
+    
+    # multi-step
+    factor = 0.01
+    for n in range(k):
+        # forward pass
+        xn_var = Variable(x_next, requires_grad=True)
+        y_model = model(xn_var)
+        loss = loss_fct(y_model, y)
+        factor = factor * 1.1
+        factor = min(factor,10)
+        loss += my_loss(x_var, xn_var, y) * factor
+
+        # compute gradient
+        grad_vars = torch.autograd.grad(loss.mean(), xn_var)[0].data
+        grad_vars -= grad_vars * x
+
+        # find the next sample
+        x_next = x_next + epsilon * torch.sign(grad_vars)
+        #x_next = x_next + 1000.0 * grad_vars
+
+        # projection
+        #x_next = clip_tensor(x_next)
+        loss_adv = loss_fct(model(Variable(x_next)), y).data
+        #print("Natural loss (%.4f) vs Adversarial loss (%.4f), With my_loss: (%.4f)" %
+        #    (loss_natural.mean(), loss_adv.mean(), loss.mean()))
+        #print(factor)
+
+    # rounding step
+    x_next = round_x(x_next, alpha=alpha)
+
+    # feasible projection
+    x_next = or_float_tensors(x_next, x)
+
+    # compute adversarial loss
+    loss_adv = loss_fct(model(Variable(x_next)), y).data
+
+    #if is_report_loss_diff:
+    print("Natural loss (%.4f) vs Adversarial loss (%.4f), Difference: (%.4f)" %
+          (loss_natural.mean(), loss_adv.mean(), loss_adv.mean() - loss_natural.mean()))
+
+    replace_flag = (loss_adv < loss_natural).unsqueeze(1).expand_as(x_next)
+    x_next[replace_flag] = x[replace_flag]
+
+    if x_next.is_cuda:
+        x_next = x_next.cpu()
+
+    return x_next
+
+def topk(x,
+            y,
+            model,
+            loss_fct,
+            k=25,
+            epsilon=0.02,
+            alpha=0.5,
+            is_report_loss_diff=False,
+            use_sample=False):
+    
+    # some book-keeping
+    if next(model.parameters()).is_cuda:
+        x = x.cuda()
+        y = y.cuda()
+    y = Variable(y)
+
+    # compute natural loss
+    y_model = model(Variable(x))
+    loss_natural = loss_fct(y_model, y).data
+
+    # initialize starting point
+    x_next = get_x0(x, use_sample).clone()
+
+    factor = 1.0
+    for n in range(1000):
+        # forward pass
+        x_old = x_next.clone()
+        xn_var = Variable(x_next, requires_grad=True)
+        y_model = model(xn_var)
+        loss = loss_fct(y_model, y)
+
+        # compute gradient
+        grads = torch.autograd.grad(loss.mean(), xn_var)[0].data
+        
+        # topk
+        signs = torch.gt(grads,0).float()
+        grads = (signs - x_next) * grads
+        grads -= x * grads
+        
+        rand_vars = torch.rand(len(grads),len(grads[0]))
+        kvals, kidx = grads.topk(k=min(10000, max(1, int(factor))), dim=1)
+        x_next.scatter_(dim=1, index=kidx, src=signs.gather(dim=1,index=kidx))
+
+        # projection
+        x_next = clip_tensor(x_next)
+        x_next = or_float_tensors(x_next, x)
+        
+        # compute adversarial loss
+        loss_adv = loss_fct(model(Variable(x_next)), y)
+        
+        if loss.data.mean() > loss_adv.data.mean():
+            factor = factor * 0.5
+            x_next = x_old
+            if factor < 0.5:
+                break
+        else:
+            factor = factor * 2.0
+    
+    # compute adversarial loss
+    y_model = model(Variable(x_next))
+    loss_adv = loss_fct(y_model, y).data
+    
+    #if is_report_loss_diff:
+    print("Natural loss (%.4f) vs Adversarial loss (%.4f), Difference: (%.4f)" %
+            (loss_natural.mean(), loss_adv.mean(), loss_adv.mean() - loss_natural.mean()))
+
+    replace_flag = (loss_adv < loss_natural).unsqueeze(1).expand_as(x_next)
+    x_next[replace_flag] = x[replace_flag]
+
+    if x_next.is_cuda:
+        x_next = x_next.cpu()
+
+    return x_next
+
+def topkextra(x,
+            y,
+            model,
+            loss_fct,
+            k=25,
+            epsilon=0.02,
+            alpha=0.5,
+            is_report_loss_diff=False,
+            use_sample=False):
+    
+    # initialize starting point
+    x_next = topk(x,y,model,loss_fct,k,epsilon,alpha,is_report_loss_diff,use_sample)
+    
+    # some book-keeping
+    if next(model.parameters()).is_cuda:
+        x = x.cuda()
+        y = y.cuda()
+        x_next = x_next.cuda()
+    y = Variable(y)
+
+    # compute natural loss
+    y_model = model(Variable(x))
+    loss_natural = loss_fct(y_model, y).data
+
+    x_best = x_next.clone()
+    best_loss = loss_natural.mean()
+
+    factor = 10.0
+    no_improve = 0
+    for n in range(1000):
+        # forward pass
+        # x_old = x_next.clone()
+        xn_var = Variable(x_next, requires_grad=True)
+        y_model = model(xn_var)
+        loss = loss_fct(y_model, y)
+
+        # compute gradient
+        grads = torch.autograd.grad(loss.mean(), xn_var)[0].data
+        
+        # topk
+        signs = torch.gt(grads,0).float()
+        grads = (signs - x_next) * grads
+        grads -= x * grads
+        
+        rand_vars = torch.rand(len(grads),len(grads[0]))
+        if next(model.parameters()).is_cuda:
+            rand_vars = rand_vars.cuda()
+        grads = rand_vars * grads
+
+        kvals, kidx = grads.topk(k=min(10000, max(1, int(factor))), dim=1)
+        x_next.scatter_(dim=1, index=kidx, src=signs.gather(dim=1,index=kidx))
+
+        # projection
+        x_next = clip_tensor(x_next)
+        x_next = or_float_tensors(x_next, x)
+        
+        # compute adversarial loss
+        loss_adv = loss_fct(model(Variable(x_next)), y)
+        
+        factor = random.random() * 20 + 1.0
+        #if loss.data.mean() > loss_adv.data.mean():
+        #    x_next = x_old
+        #    factor = max(1,factor * 0.5)
+        #else:
+        #    factor = factor * 2.0
+    
+        if loss_adv.data.mean() > best_loss:
+            x_best = x_next.clone()
+            best_loss = loss_adv.data.mean()
+            no_improve = 0
+        else:
+            no_improve += 1
+
+        if no_improve > k:
+            break
+
+    x_next = x_best
+    # compute adversarial loss
+    y_model = model(Variable(x_next))
+    loss_adv = loss_fct(y_model, y).data
+    
+    #if is_report_loss_diff:
+    print("Natural loss (%.4f) vs Adversarial loss (%.4f), Difference: (%.4f)" %
+            (loss_natural.mean(), loss_adv.mean(), loss_adv.mean() - loss_natural.mean()))
+
+    replace_flag = (loss_adv < loss_natural).unsqueeze(1).expand_as(x_next)
+    x_next[replace_flag] = x[replace_flag]
+
+    if x_next.is_cuda:
+        x_next = x_next.cpu()
+
+    return x_next
 
 
 def dfgsm_k(x,
@@ -97,9 +340,9 @@ def dfgsm_k(x,
     # compute adversarial loss
     loss_adv = loss_fct(model(Variable(x_next)), y).data
 
-    if is_report_loss_diff:
-        print("Natural loss (%.4f) vs Adversarial loss (%.4f), Difference: (%.4f)" %
-              (loss_natural.mean(), loss_adv.mean(), loss_adv.mean() - loss_natural.mean()))
+    #if is_report_loss_diff:
+    print("Natural loss (%.4f) vs Adversarial loss (%.4f), Difference: (%.4f)" %
+         (loss_natural.mean(), loss_adv.mean(), loss_adv.mean() - loss_natural.mean()))
 
     replace_flag = (loss_adv < loss_natural).unsqueeze(1).expand_as(x_next)
     x_next[replace_flag] = x[replace_flag]
@@ -109,6 +352,100 @@ def dfgsm_k(x,
 
     return x_next
 
+def flex_rfgsm_k(x, y, model, loss_fct, k=25, epsilon=0.02, is_report_loss_diff=False, use_sample=False):
+    """
+    FGSM^k with randomized rounding
+    :param x: (tensor) feature vector
+    :param y:
+    :param model: nn model
+    :param loss_fct: loss function
+    :param k: num of steps
+    :param epsilon: update value in each direction
+    :param is_report_loss_diff:
+    :param use_sample:
+    :return: the adversarial version of x according to rfgsm_k (tensor)
+    """
+    # some book-keeping
+    if next(model.parameters()).is_cuda:
+        x = x.cuda()
+        y = y.cuda()
+    y = Variable(y)
+
+    # compute natural loss
+    loss_natural = loss_fct(model(Variable(x)), y).data
+
+    # initialize starting point
+    x_next = get_x0(x, use_sample)
+
+    factor = 1000.0
+    for n in range(k):
+        x_old = x_next.clone()
+        # forward pass
+        x_var = Variable(x_next, requires_grad=True)
+        y_model = model(x_var)
+        loss = loss_fct(y_model, y)
+
+        # compute gradient
+        grad_vars = torch.autograd.grad(loss.mean(), x_var)[0].data
+        grad_vars -= grad_vars * x
+
+        # find the next sample
+        #x_next = x_next + factor * torch.sign(grad_vars[0].data)
+        x_next = x_next + factor * grad_vars
+
+        # projection
+        x_next = clip_tensor(x_next)
+
+        loss_adv = loss_fct(model(Variable(x_next)), y)
+        
+        #if is_report_loss_diff:
+        #print("Natural loss (%.4f) vs Clean adversarial loss (%.4f) vs. Adversarial loss (%.4f), Difference: (%.4f)" %
+        #     (loss_natural.mean(), loss_clean.mean(), loss_adv.mean(), loss_adv.mean() - loss_natural.mean()))
+        print("Natural loss (%.4f) vs. Adversarial loss (%.4f), Difference: (%.4f)" %
+             (loss_natural.mean(), loss_adv.data.mean(), loss_adv.mean() - loss_natural.mean()))
+        
+        if loss.data.mean() > loss_adv.data.mean():
+            factor = factor * 0.5
+            x_next = x_old
+        else:
+            factor = factor * 2.0
+      
+    x_best = x_next.clone()
+    best_val = -1.0
+    x_old = x_next.clone()
+    # rounding step
+    for n in range(1000):
+        alpha = torch.rand(x_next.size())
+        if x_next.is_cuda:
+            alpha = alpha.cuda()
+        x_next = round_x(x_next, alpha=alpha)
+        x_next = or_float_tensors(x_next, x)
+        loss_adv = loss_fct(model(Variable(x_next)), y).data
+        print(loss_adv.mean())
+        if loss_adv.mean() > best_val or best_val == -1.0:
+            best_val = loss_adv.mean()
+            x_bext = x_next.clone()
+        x_next = x_old
+
+    x_next = x_best
+
+    # feasible projection
+    x_next = or_float_tensors(x_next, x)
+
+    # compute adversarial loss
+    loss_adv = loss_fct(model(Variable(x_next)), y).data
+
+    #if is_report_loss_diff:
+    print("Natural loss (%.4f) vs Adversarial loss (%.4f), Difference: (%.4f)" %
+          (loss_natural.mean(), loss_adv.mean(), loss_adv.mean() - loss_natural.mean()))
+
+    replace_flag = (loss_adv < loss_natural).unsqueeze(1).expand_as(x_next)
+    x_next[replace_flag] = x[replace_flag]
+
+    if x_next.is_cuda:
+        x_next = x_next.cpu()
+
+    return x_next
 
 def rfgsm_k(x, y, model, loss_fct, k=25, epsilon=0.02, is_report_loss_diff=False, use_sample=False):
     """
@@ -163,9 +500,9 @@ def rfgsm_k(x, y, model, loss_fct, k=25, epsilon=0.02, is_report_loss_diff=False
     # compute adversarial loss
     loss_adv = loss_fct(model(Variable(x_next)), y).data
 
-    if is_report_loss_diff:
-        print("Natural loss (%.4f) vs Adversarial loss (%.4f), Difference: (%.4f)" %
-              (loss_natural.mean(), loss_adv.mean(), loss_adv.mean() - loss_natural.mean()))
+    #if is_report_loss_diff:
+    print("Natural loss (%.4f) vs Adversarial loss (%.4f), Difference: (%.4f)" %
+          (loss_natural.mean(), loss_adv.mean(), loss_adv.mean() - loss_natural.mean()))
 
     replace_flag = (loss_adv < loss_natural).unsqueeze(1).expand_as(x_next)
     x_next[replace_flag] = x[replace_flag]
@@ -237,9 +574,9 @@ def bga_k(x, y, model, loss_fct, k=25, is_report_loss_diff=False, use_sample=Fal
         x_worst[replace_flag.unsqueeze(1).expand_as(x_worst)] = x_next[replace_flag.unsqueeze(1)
                                                                        .expand_as(x_worst)]
 
-    if is_report_loss_diff:
-        print("Natural loss (%.4f) vs Adversarial loss (%.4f), Difference: (%.4f)" %
-              (loss_natural.mean(), loss_worst.mean(), loss_worst.mean() - loss_natural.mean()))
+    #if is_report_loss_diff:
+    print("Natural loss (%.4f) vs Adversarial loss (%.4f), Difference: (%.4f)" %
+          (loss_natural.mean(), loss_worst.mean(), loss_worst.mean() - loss_natural.mean()))
 
     if x_worst.is_cuda:
         x_worst = x_worst.cpu()
@@ -305,9 +642,9 @@ def bca_k(x, y, model, loss_fct, k=25, is_report_loss_diff=False, use_sample=Fal
         x_worst[replace_flag.unsqueeze(1).expand_as(x_worst)] = x_next[replace_flag.unsqueeze(1)
                                                                        .expand_as(x_worst)]
 
-    if is_report_loss_diff:
-        print("Natural loss (%.4f) vs Adversarial loss (%.4f), Difference: (%.4f)" %
-              (loss_natural.mean(), loss_worst.mean(), loss_worst.mean() - loss_natural.mean()))
+    #if is_report_loss_diff:
+    print("Natural loss (%.4f) vs Adversarial loss (%.4f), Difference: (%.4f)" %
+          (loss_natural.mean(), loss_worst.mean(), loss_worst.mean() - loss_natural.mean()))
 
     if x_worst.is_cuda:
         x_worst = x_worst.cpu()
@@ -372,9 +709,9 @@ def grosse_k(x, y, model, loss_fct, k=25, is_report_loss_diff=False, use_sample=
         x_worst[replace_flag.unsqueeze(1).expand_as(x_worst)] = x_next[replace_flag.unsqueeze(1)
                                                                        .expand_as(x_worst)]
 
-    if is_report_loss_diff:
-        print("Natural loss (%.4f) vs Adversarial loss (%.4f), Difference: (%.4f)" %
-              (loss_natural.mean(), loss_worst.mean(), loss_worst.mean() - loss_natural.mean()))
+    #if is_report_loss_diff:
+    print("Natural loss (%.4f) vs Adversarial loss (%.4f), Difference: (%.4f)" %
+          (loss_natural.mean(), loss_worst.mean(), loss_worst.mean() - loss_natural.mean()))
 
     if x_worst.is_cuda:
         x_worst = x_worst.cpu()
@@ -382,7 +719,7 @@ def grosse_k(x, y, model, loss_fct, k=25, is_report_loss_diff=False, use_sample=
     return x_worst
 
 
-def inner_maximizer(x, y, model, loss_fct, iterations=100, method='natural'):
+def inner_maximizer(x, y, model, loss_fct, iterations=100, method='natural', mal_index=0, dataset={}):
     """
     A wrapper function for the above algorithim
     :param iterations:
@@ -393,6 +730,30 @@ def inner_maximizer(x, y, model, loss_fct, iterations=100, method='natural'):
     :param method: one of 'dfgsm_k', 'rfgsm_k', 'bga_k', 'bca_k', 'natural
     :return: adversarial examples
     """
+    try:
+        print("Len dataset is %s at batchnumber %s" % (len(dataset["benign"].dataset), mal_index ) )
+        print("The second malicious datapoint is %s" % (dataset["malicious"].dataset[mal_index+1][0]) ) 
+        print("Len of batch is %s" % len(x))
+    except KeyError:
+        pass
+    #for v in range(len(x)):
+    #    x_next = topk(x[v:v+1,:], y, model, loss_fct, k=iterations)
+    #    print(torch.sum(x_next,dim=1))
+    #x_next = dfgsm_k(x, y, model, loss_fct, k=iterations)
+    #print(torch.sum(x_next,dim=1))
+    #return x_next
+    
+    #print("\n")
+    #dfgsm_k(x, y, model, loss_fct, k=iterations)
+    rfgsm_k(x, y, model, loss_fct, k=iterations)
+    #bga_k(x, y, model, loss_fct, k=iterations)
+    #bca_k(x, y, model, loss_fct, k=iterations)
+    #grosse_k(x, y, model, loss_fct, k=iterations)
+    #newloss(x, y, model, loss_fct, k=iterations)
+    #topk(x, y, model, loss_fct, k=iterations)
+    #topkextra(x, y, model, loss_fct, k=iterations)
+    #print("\n")
+    
     if method == 'dfgsm_k':
         return dfgsm_k(x, y, model, loss_fct, k=iterations)
     elif method == 'rfgsm_k':
@@ -403,6 +764,12 @@ def inner_maximizer(x, y, model, loss_fct, iterations=100, method='natural'):
         return bca_k(x, y, model, loss_fct, k=iterations)
     elif method == 'grosse':
         return grosse_k(x, y, model, loss_fct, k=iterations)
+    elif method == 'topk':
+        return topk(x, y, model, loss_fct, k=iterations)
+    elif method == 'topk+':
+        return topkextra(x, y, model, loss_fct, k=iterations)
+    elif method == 'myloss':
+        return newloss(x, y, model, loss_fct, k=iterations)
     elif method == 'natural':
         return x
     else:

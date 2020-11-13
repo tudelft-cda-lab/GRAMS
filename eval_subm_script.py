@@ -22,7 +22,7 @@ ATTACK_DIR='./attack_submissions'
 # e.g., ./defend_submissions/[training:methoda|.pt
 #       ./defend_submissions/[training:methodb|.pt
 #
-DEFEND_DIR='./defend_submissions'
+DEFEND_DIR='./model_files'
 
 
 def eval_attack_submssions():
@@ -50,7 +50,7 @@ def eval_attack_submssions():
 
 def eval_defend_submissions():
     parameters_filepath = "./helper_files/parameters_holdout.ini"
-    evasion_methods = ['natural', 'rfgsm_k', 'dfgsm_k', 'bga_k', 'bca_k', 'grosse']
+    evasion_methods = ['natural', 'rfgsm_k', 'topk', 'bca_k', 'grosse']
 
     for model_filepath in glob.glob(os.path.join(DEFEND_DIR, '*.pt') ):
         submission_name = re.search("\[training:.*\|", model_filepath).group(0)[:-1].split(':')[-1]
@@ -71,5 +71,8 @@ def eval_defend_submissions():
 
 
 if __name__ == "__main__":
-    #eval_defend_submissions()
-    eval_attack_submssions()
+    create_tex_tables(filespath="./result_files")
+
+    exit()
+    eval_defend_submissions()
+    #eval_attack_submssions()
