@@ -10,70 +10,6 @@ import numpy as np
 import random
 import math
 
-mzeros = [144, 203, 308, 732, 1137, 1155, 1387, 1685, 1715, 1750, 1868, 1979, 2136, 2415, 2513, 2682, 2856, 3160, 3398, 3616, 3621, 3827, 4004, 4278, 4293, 5045, 5658, 5687, 5726, 5954, 5986, 6218, 6332, 6583, 6653, 6718, 6755, 7029, 7306, 7815, 8116, 8207, 8336, 9103]
-bzeros = [2869, 3294]
-
-thresholds = np.load('thresholds.npy')
-thresholds = torch.from_numpy(thresholds)
-dimx = 22761
-
-'''mal_map = dict()
-map_mal = dict()
-
-fi = open("mal_mapping.txt", "r")
-for line in fi.readlines():
-     spl = line.split("|")
-     ind = int(spl[0])
-     mal = int(spl[1])
-     if mal != -1:
-         mal_map[mal] = ind
-         map_mal[ind] = mal
-         
-
-ben_map = dict()
-map_ben = dict()
-
-fi = open("ben_mapping.txt", "r")
-for line in fi.readlines():
-     spl = line.split("|")
-     ind = int(spl[0])
-     mal = int(spl[1])
-     if mal != -1:
-         ben_map[mal] = ind
-         map_ben[ind] = mal
-'''      
-
-fi = open("conversion_fixed.txt", "r")
-matching_dict = dict()
-
-for line in fi.readlines():
-     #line = line[:-1]
-     spl = line.split("|")
-     ben = int(spl[0])
-     #if ben in bzeros:
-     #  continue
-     #if ben not in ben_map.keys():
-     #  continue
-
-     #ben = ben_map[ben]
-    
-     
-     spl2 = spl[1].split(",")[:-1]
-     spl2 = [int(el) for el in spl2]
-
-     for i in spl2:
-     #    if i in mzeros:
-     #        continue
-     #    if i not in mal_map.keys():
-     #        continue
-
-     #    i = mal_map[i]
-         
-         if i not in matching_dict.keys():
-             matching_dict[i] = []
-         matching_dict[i].append(ben)
-
-
 # helper function
 def round_x(x, alpha=0.5):
     """
@@ -1101,8 +1037,6 @@ def inner_maximizer(x, y, model, loss_fct, iterations=100, method='natural', mal
         return topkextra(x, y, model, loss_fct, is_report_loss_diff=True, k=iterations)
     elif method == 'topkr':
         return topkrestart(x, y, model, loss_fct, is_report_loss_diff=True, k=iterations)
-    elif method == 'topkm':
-        return matching(x, y, model, loss_fct, is_report_loss_diff=True, k=iterations, mal_index=mal_index, dataset=dataset)
     elif method == 'natural':
         return x
     else:
