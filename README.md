@@ -202,23 +202,3 @@ python script_functions.py
 As mentioned earlier, the trained models will be saved under `helper_files`.
 
 
------
-#### Citation
-
-If you make use of this code and you'd like to cite us, please consider the following:
-
-```
-@inproceedings{al2018adversarial,
-  title={Adversarial deep learning for robust detection of binary encoded malware},
-  author={Al-Dujaili, Abdullah and Huang, Alex and Hemberg, Erik and O'Reilly, Una-May},
-  booktitle={2018 IEEE Security and Privacy Workshops (SPW)},
-  pages={76--82},
-  year={2018},
-  organization={IEEE}
-}
-```
-
-#### Acknowledgement:
-
-We thank Edward Raff for the valuable feedback.
-
