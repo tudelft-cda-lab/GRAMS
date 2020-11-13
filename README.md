@@ -1,4 +1,36 @@
-# GRAMS based on Robust Malware Detection Challenge as follows:
+# GRAMS based on Robust Malware Detection Challenge as follows
+
+added methods to`inner_maxizers.py` 
+
+* topk
+* topk+
+* topkr
+* topkm
+* rand
+
+Methods are described in:
+
+```
+@inproceedings{verwer2020robust,
+  title={The Robust Malware Detection Challenge and Greedy Random Accelerated Multi-Bit Search},
+  author={Verwer, Sicco and Nadeem, Azqa and Hammerschmidt, Christian and Bliek, Laurens and Al-Dujaili, Abdullah and O'Reilly, Una-May},
+  booktitle={Proceedings of the 13th ACM Workshop on Artificial Intelligence and Security},
+  pages={61--70},
+  year={2020}
+}
+``` 
+
+and the framework is based on
+```
+@inproceedings{al2018adversarial,
+  title={Adversarial deep learning for robust detection of binary encoded malware},
+  author={Al-Dujaili, Abdullah and Huang, Alex and Hemberg, Erik and O'Reilly, Una-May},
+  booktitle={2018 IEEE Security and Privacy Workshops (SPW)},
+  pages={76--82},
+  year={2018},
+  organization={IEEE}
+}
+```
 
 # Robust Malware Detection Challenge
 
