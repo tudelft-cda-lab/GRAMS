@@ -5,7 +5,6 @@ added methods to`inner_maxizers.py`
 * topk
 * topk+
 * topkr
-* topkm
 * rand
 
 Methods are described in:
